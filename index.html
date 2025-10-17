@@ -1,146 +1,348 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>カレンダー式タスクリスト</title>
-  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
-  <style>
-    body { font-family: sans-serif; margin: 20px; }
-    .fc-daygrid-day-number { font-size: 0.8em; }
-    .title-item { font-size: 0.8em; cursor: pointer; color: #007bff; margin-top: 2px; }
-    .title-item:hover { text-decoration: underline; }
-    .done { text-decoration: line-through; color: #999; }
-    #todo-panel { margin-top: 10px; border-top: 1px solid #ccc; padding-top: 10px; }
-    .task { font-size: 0.9em; display: flex; align-items: center; gap: 6px; }
-    #add-title, #add-task { margin-top: 8px; }
-  </style>
+<meta charset="UTF-8">
+<title>タスクカレンダー v6.1（スマホ＋カラー＋週ビュー＋削除対応）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body { font-family: "Segoe UI", sans-serif; margin: 10px; background: #f9f9f9; }
+  h2 { text-align: center; }
+  #nav { display: flex; justify-content: space-between; align-items: center; margin: 5px 0; flex-wrap: wrap; }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+  th, td { border: 1px solid #ccc; width: 14.28%; vertical-align: top; height: 100px; position: relative; background: #fff; cursor: pointer; }
+  th { background: #f1f1f1; }
+  td[data-today="true"] { background: #fffbe0; }
+  .date-number { position: absolute; top: 4px; right: 4px; font-size: 12px; color: #555; }
+  .title { margin: 2px; padding: 2px 4px; border-radius: 4px; font-size: 11px; color: #fff; cursor: pointer; }
+  .task-list { margin-left: 8px; font-size: 10px; display: none; }
+  .task-item { display: flex; align-items: center; margin: 1px 0; }
+  .task-item.done span { text-decoration: line-through; color: gray; }
+  .add-subtask { margin-top: 3px; }
+  .add-subtask input { width: 60%; font-size: 10px; padding: 2px; }
+  .add-subtask button { font-size: 10px; margin-left: 3px; }
+  .color-dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: middle; }
+
+  /* ポップアップ */
+  #overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); z-index: 500; }
+  #popupForm {
+    display: none; position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%, -50%) scale(0.95);
+    background: #fff; border: 2px solid #4a90e2; padding: 15px;
+    border-radius: 10px; box-shadow: 0 0 15px rgba(0,0,0,0.3);
+    z-index: 1000; opacity: 0; transition: all 0.25s ease;
+    width: 90%; max-width: 350px;
+  }
+  #popupForm.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #popupForm input, select { margin: 5px; padding: 5px; font-size: 12px; width: 90%; }
+  #popupForm button { margin: 5px; padding: 5px 10px; }
+
+  /* 今日の予定 */
+  #todayTasks { background: #e9f3ff; border-radius: 8px; padding: 10px; margin-bottom: 10px; font-size: 13px; }
+
+  /* 週ビュー切替 */
+  #viewToggle { margin: 5px 0; text-align: center; }
+  #viewToggle button { margin: 2px; }
+
+  /* スマホ対応 */
+  @media (max-width: 768px) {
+    th, td { height: 80px; font-size: 11px; }
+    .task-list { font-size: 9px; }
+    .add-subtask input { width: 70%; }
+  }
+</style>
 </head>
 <body>
-  <div id="calendar"></div>
 
-  <div id="todo-panel">
-    <h3 id="selected-date"></h3>
-    <div id="title-list"></div>
+<h2>?? タスクカレンダー v6.1</h2>
 
-    <input id="new-title" placeholder="タイトルを追加（例：業務スーパー）">
-    <button id="add-title">＋タイトル追加</button>
+<div id="todayTasks"></div>
 
-    <div id="task-area"></div>
-  </div>
+<div id="nav">
+  <button onclick="changeMonth(-1)">＜ 前月</button>
+  <h3 id="monthLabel"></h3>
+  <button onclick="changeMonth(1)">次月 ＞</button>
+</div>
 
-  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
-  <script>
-    const storageKey = "calendar_nested_todos";
-    let todos = JSON.parse(localStorage.getItem(storageKey) || "{}");
-    let selectedDate = null;
-    let selectedTitleIndex = null;
+<div id="viewToggle">
+  <button onclick="switchView('month')">?? 月ビュー</button>
+  <button onclick="switchView('week')">?? 週ビュー</button>
+</div>
 
-    const calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
-      initialView: 'dayGridMonth',
-      dateClick: (info) => {
-        selectedDate = info.dateStr;
-        selectedTitleIndex = null;
-        document.getElementById("selected-date").textContent = selectedDate;
-        renderTitles();
-      },
-      dayCellDidMount: (info) => renderTitlesInCell(info)
-    });
-    calendar.render();
+<div id="calendar"></div>
 
-    // --- 日付セルにタイトル一覧を描画 ---
-    function renderTitlesInCell(info) {
-      const date = info.date.toISOString().split("T")[0];
-      const cell = info.el.querySelector(".fc-daygrid-day-frame");
-      const list = document.createElement("div");
-      (todos[date] || []).forEach((group, i) => {
-        const div = document.createElement("div");
-        div.classList.add("title-item");
-        div.textContent = "・" + group.title;
-        div.onclick = () => {
-          selectedDate = date;
-          selectedTitleIndex = i;
-          renderTitles();
-        };
-        list.appendChild(div);
-      });
-      cell.appendChild(list);
-    }
+<!-- ポップアップ -->
+<div id="overlay" onclick="closePopup()"></div>
+<div id="popupForm">
+  <h3>新規タイトル追加フォーム</h3>
+  <label>日付：</label><input type="text" id="popupDate" readonly><br>
+  <label>タイトル：</label><input type="text" id="popupTitle" placeholder="例：業務スーパー"><br>
+  <label>サブタスク：</label><input type="text" id="popupItem" placeholder="例：牛乳を買う"><br>
+  <label>カテゴリ色：</label>
+  <select id="popupColor">
+    <option value="#4a90e2">青（仕事）</option>
+    <option value="#2ecc71">緑（買い物）</option>
+    <option value="#f39c12">オレンジ（趣味）</option>
+    <option value="#9b59b6">紫（学習）</option>
+    <option value="#e74c3c">赤（重要）</option>
+  </select><br>
+  <button onclick="submitPopup()">＋追加</button>
+  <button onclick="closePopup()">閉じる</button>
+</div>
 
-    // --- タイトル一覧＋タスクを右下エリアに描画 ---
-    function renderTitles() {
-      const titleList = document.getElementById("title-list");
-      const taskArea = document.getElementById("task-area");
-      titleList.innerHTML = "";
-      taskArea.innerHTML = "";
+<script>
+let data = JSON.parse(localStorage.getItem("calendarData")) || {};
+let expanded = JSON.parse(localStorage.getItem("expandedTitles")) || {};
+let colors = JSON.parse(localStorage.getItem("titleColors")) || {};
+let currentYear = new Date().getFullYear();
+let currentMonth = new Date().getMonth();
+let currentView = "month";
+let selectedDate = null;
 
-      (todos[selectedDate] || []).forEach((group, i) => {
-        const div = document.createElement("div");
-        div.textContent = `${i + 1}. ${group.title}`;
-        div.classList.add("title-item");
-        if (i === selectedTitleIndex) div.style.fontWeight = "bold";
-        div.onclick = () => {
-          selectedTitleIndex = i;
-          renderTitles();
-        };
-        titleList.appendChild(div);
-      });
+function saveData() {
+  localStorage.setItem("calendarData", JSON.stringify(data));
+  localStorage.setItem("expandedTitles", JSON.stringify(expanded));
+  localStorage.setItem("titleColors", JSON.stringify(colors));
+}
 
-      if (selectedTitleIndex !== null) {
-        const g = todos[selectedDate][selectedTitleIndex];
-        const ul = document.createElement("div");
-        g.tasks.forEach((t, idx) => {
-          const li = document.createElement("div");
-          li.classList.add("task");
-          if (t.done) li.classList.add("done");
-          li.innerHTML = `<input type='checkbox' ${t.done ? "checked" : ""} onchange='toggleTask("${selectedDate}", ${selectedTitleIndex}, ${idx}, this.checked)'> ${t.text}`;
-          ul.appendChild(li);
-        });
-        taskArea.appendChild(ul);
+function renderCalendar(year, month) {
+  const calendarDiv = document.getElementById("calendar");
+  calendarDiv.innerHTML = "";
+  document.getElementById("monthLabel").textContent = `${year}年 ${month + 1}月`;
 
-        const addTaskInput = document.createElement("input");
-        addTaskInput.id = "new-task";
-        addTaskInput.placeholder = "タスクを追加（例：トマトを買う）";
-        const addBtn = document.createElement("button");
-        addBtn.textContent = "＋タスク追加";
-        addBtn.onclick = addTask;
-        taskArea.appendChild(addTaskInput);
-        taskArea.appendChild(addBtn);
+  const table = document.createElement("table");
+  const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+  const headerRow = document.createElement("tr");
+  weekdays.forEach(day => {
+    const th = document.createElement("th");
+    th.textContent = day;
+    headerRow.appendChild(th);
+  });
+  table.appendChild(headerRow);
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startWeek = firstDay.getDay();
+  const totalDays = lastDay.getDate();
+
+  let startDate = 1;
+  if (currentView === "week") {
+    const today = new Date();
+    const diff = today.getDate() - today.getDay();
+    startDate = Math.max(1, diff);
+  }
+
+  let date = startDate;
+  const endDay = (currentView === "week") ? Math.min(totalDays, startDate + 6) : totalDays;
+
+  for (let i = 0; i < 6 && date <= endDay; i++) {
+    const row = document.createElement("tr");
+    for (let j = 0; j < 7 && date <= endDay; j++) {
+      const cell = document.createElement("td");
+      const fullDate = `${year}-${String(month + 1).padStart(2,"0")}-${String(date).padStart(2,"0")}`;
+      cell.onclick = (e) => {
+        if (e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON" && e.target.tagName !== "SPAN") {
+          openPopup(fullDate);
+        }
+      };
+
+      const today = new Date();
+      if (today.getFullYear() === year && today.getMonth() === month && today.getDate() === date) {
+        cell.setAttribute("data-today", "true");
       }
 
-      calendar.render();
+      const dateLabel = document.createElement("div");
+      dateLabel.className = "date-number";
+      dateLabel.textContent = date;
+      cell.appendChild(dateLabel);
+
+      if (data[fullDate]) {
+        Object.keys(data[fullDate]).forEach(title => {
+          const color = colors[title] || "#4a90e2";
+          const titleDiv = document.createElement("div");
+          titleDiv.className = "title";
+          titleDiv.textContent = title;
+          titleDiv.style.background = color;
+
+          titleDiv.oncontextmenu = (e) => {
+            e.preventDefault();
+            if (confirm("このタイトルを削除しますか？")) {
+              delete data[fullDate][title];
+              if (Object.keys(data[fullDate]).length === 0) delete data[fullDate];
+              saveData();
+              renderCalendar(currentYear, currentMonth);
+            }
+          };
+
+          const taskList = document.createElement("div");
+          taskList.className = "task-list";
+          const isOpen = expanded[fullDate]?.includes(title);
+          taskList.style.display = isOpen ? "block" : "none";
+
+          data[fullDate][title].forEach((task, index) => {
+            const itemDiv = document.createElement("div");
+            itemDiv.className = "task-item";
+            if (task.done) itemDiv.classList.add("done");
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = task.done;
+            checkbox.onchange = () => {
+              task.done = checkbox.checked;
+              saveData();
+              renderCalendar(currentYear, currentMonth);
+            };
+
+            const span = document.createElement("span");
+            span.textContent = task.text;
+
+            // ? 編集
+            span.onclick = () => {
+              const newText = prompt("サブタスクを編集:", task.text);
+              if (newText && newText.trim() !== "") {
+                task.text = newText.trim();
+                saveData();
+                renderCalendar(currentYear, currentMonth);
+              }
+            };
+
+            // ? 右クリック削除（PC）
+            span.oncontextmenu = (e) => {
+              e.preventDefault();
+              if (confirm("このサブタスクを削除しますか？")) {
+                data[fullDate][title].splice(index, 1);
+                if (data[fullDate][title].length === 0) delete data[fullDate][title];
+                if (Object.keys(data[fullDate]).length === 0) delete data[fullDate];
+                saveData();
+                renderCalendar(currentYear, currentMonth);
+              }
+            };
+
+            // ? 長押し削除（スマホ）
+            let pressTimer;
+            span.addEventListener("touchstart", () => {
+              pressTimer = setTimeout(() => {
+                if (confirm("このサブタスクを削除しますか？")) {
+                  data[fullDate][title].splice(index, 1);
+                  if (data[fullDate][title].length === 0) delete data[fullDate][title];
+                  if (Object.keys(data[fullDate]).length === 0) delete data[fullDate];
+                  saveData();
+                  renderCalendar(currentYear, currentMonth);
+                }
+              }, 1000);
+            });
+            span.addEventListener("touchend", () => clearTimeout(pressTimer));
+
+            itemDiv.appendChild(checkbox);
+            itemDiv.appendChild(span);
+            taskList.appendChild(itemDiv);
+          });
+
+          const addDiv = document.createElement("div");
+          addDiv.className = "add-subtask";
+          const input = document.createElement("input");
+          input.placeholder = "＋ サブタスク追加";
+          const btn = document.createElement("button");
+          btn.textContent = "＋";
+          btn.onclick = (ev) => {
+            ev.stopPropagation();
+            const txt = input.value.trim();
+            if (!txt) return;
+            data[fullDate][title].push({ text: txt, done: false });
+            input.value = "";
+            saveData();
+            renderCalendar(currentYear, currentMonth);
+          };
+          addDiv.appendChild(input);
+          addDiv.appendChild(btn);
+          taskList.appendChild(addDiv);
+
+          titleDiv.onclick = (e) => {
+            e.stopPropagation();
+            const open = taskList.style.display === "block";
+            taskList.style.display = open ? "none" : "block";
+            if (!expanded[fullDate]) expanded[fullDate] = [];
+            if (open) expanded[fullDate] = expanded[fullDate].filter(t => t !== title);
+            else expanded[fullDate].push(title);
+            saveData();
+          };
+
+          cell.appendChild(titleDiv);
+          cell.appendChild(taskList);
+        });
+      }
+
+      row.appendChild(cell);
+      date++;
     }
+    table.appendChild(row);
+  }
 
-    // --- タイトル追加 ---
-    document.getElementById("add-title").onclick = () => {
-      const text = document.getElementById("new-title").value.trim();
-      if (!text || !selectedDate) return;
-      if (!todos[selectedDate]) todos[selectedDate] = [];
-      todos[selectedDate].push({ title: text, tasks: [] });
-      document.getElementById("new-title").value = "";
-      localStorage.setItem(storageKey, JSON.stringify(todos));
-      renderTitles();
-    };
+  calendarDiv.appendChild(table);
+  renderTodayTasks();
+}
 
-    // --- タスク追加 ---
-    function addTask() {
-      const text = document.getElementById("new-task").value.trim();
-      if (!text || selectedTitleIndex === null) return;
-      todos[selectedDate][selectedTitleIndex].tasks.push({ text, done: false });
-      document.getElementById("new-task").value = "";
-      localStorage.setItem(storageKey, JSON.stringify(todos));
-      renderTitles();
-    }
+function openPopup(date) {
+  selectedDate = date;
+  document.getElementById("popupDate").value = date;
+  document.getElementById("popupForm").classList.add("show");
+  document.getElementById("popupForm").style.display = "block";
+  document.getElementById("overlay").style.display = "block";
+}
+function closePopup() {
+  document.getElementById("popupForm").classList.remove("show");
+  setTimeout(() => {
+    document.getElementById("popupForm").style.display = "none";
+    document.getElementById("overlay").style.display = "none";
+  }, 200);
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePopup(); });
 
-    // --- チェック反映 ---
-    function toggleTask(date, titleIdx, taskIdx, done) {
-      todos[date][titleIdx].tasks[taskIdx].done = done;
-      localStorage.setItem(storageKey, JSON.stringify(todos));
-      renderTitles();
-    }
+function submitPopup() {
+  const title = document.getElementById("popupTitle").value.trim();
+  const item = document.getElementById("popupItem").value.trim();
+  const color = document.getElementById("popupColor").value;
+  if (!title || !item) return alert("タイトルとサブタスクを入力してください");
+  if (!data[selectedDate]) data[selectedDate] = {};
+  if (!data[selectedDate][title]) data[selectedDate][title] = [];
+  data[selectedDate][title].push({ text: item, done: false });
+  colors[title] = color;
+  saveData();
+  closePopup();
+  renderCalendar(currentYear, currentMonth);
+}
 
-    // グローバル公開
-    window.toggleTask = toggleTask;
-  </script>
+function changeMonth(delta) {
+  currentMonth += delta;
+  if (currentMonth < 0) { currentMonth = 11; currentYear--; }
+  else if (currentMonth > 11) { currentMonth = 0; currentYear++; }
+  renderCalendar(currentYear, currentMonth);
+}
+
+function switchView(mode) {
+  currentView = mode;
+  renderCalendar(currentYear, currentMonth);
+}
+
+function renderTodayTasks() {
+  const today = new Date();
+  const dateKey = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+  const div = document.getElementById("todayTasks");
+  div.innerHTML = `<b>?? 今日：${dateKey}</b><br>`;
+  if (!data[dateKey]) {
+    div.innerHTML += "本日の予定はありません。";
+    return;
+  }
+  Object.keys(data[dateKey]).forEach(title => {
+    const color = colors[title] || "#4a90e2";
+    div.innerHTML += `<span class="color-dot" style="background:${color}"></span><b>${title}</b><br>`;
+    data[dateKey][title].forEach(t => {
+      div.innerHTML += `・${t.text}${t.done ? " ?" : ""}<br>`;
+    });
+  });
+}
+
+window.onload = () => renderCalendar(currentYear, currentMonth);
+</script>
+
 </body>
 </html>
