@@ -1,0 +1,53 @@
+<div id="calendar"></div>
+<div id="todo-panel" class="hidden">
+  <h3 id="selected-date"></h3>
+  <ul id="todo-list"></ul>
+  <input id="new-item" placeholder="項目を追加">
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+<script>
+const storageKey = "calendar_todos";
+let todos = JSON.parse(localStorage.getItem(storageKey) || "{}");
+
+const calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
+  initialView: 'dayGridMonth',
+  dateClick: (info) => openTodoPanel(info.dateStr)
+});
+calendar.render();
+
+function openTodoPanel(date) {
+  const panel = document.getElementById("todo-panel");
+  panel.classList.remove("hidden");
+  document.getElementById("selected-date").textContent = date;
+  renderList(date);
+}
+
+function renderList(date) {
+  const ul = document.getElementById("todo-list");
+  ul.innerHTML = "";
+  (todos[date] || []).forEach((item, i) => {
+    const li = document.createElement("li");
+    li.innerHTML = `<input type="checkbox" ${item.done ? "checked" : ""} 
+      onchange="toggle('${date}', ${i}, this.checked)"> ${item.text}`;
+    ul.appendChild(li);
+  });
+}
+
+function toggle(date, index, done) {
+  todos[date][index].done = done;
+  localStorage.setItem(storageKey, JSON.stringify(todos));
+}
+
+document.getElementById("new-item").addEventListener("keypress", (e) => {
+  if (e.key === "Enter") {
+    const date = document.getElementById("selected-date").textContent;
+    const text = e.target.value.trim();
+    if (!todos[date]) todos[date] = [];
+    todos[date].push({ text, done: false });
+    e.target.value = "";
+    localStorage.setItem(storageKey, JSON.stringify(todos));
+    renderList(date);
+  }
+});
+</script>
