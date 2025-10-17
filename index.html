@@ -1,53 +1,146 @@
-<div id="calendar"></div>
-<div id="todo-panel" class="hidden">
-  <h3 id="selected-date"></h3>
-  <ul id="todo-list"></ul>
-  <input id="new-item" placeholder="項目を追加">
-</div>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>カレンダー式タスクリスト</title>
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet">
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    .fc-daygrid-day-number { font-size: 0.8em; }
+    .title-item { font-size: 0.8em; cursor: pointer; color: #007bff; margin-top: 2px; }
+    .title-item:hover { text-decoration: underline; }
+    .done { text-decoration: line-through; color: #999; }
+    #todo-panel { margin-top: 10px; border-top: 1px solid #ccc; padding-top: 10px; }
+    .task { font-size: 0.9em; display: flex; align-items: center; gap: 6px; }
+    #add-title, #add-task { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <div id="calendar"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
-<script>
-const storageKey = "calendar_todos";
-let todos = JSON.parse(localStorage.getItem(storageKey) || "{}");
+  <div id="todo-panel">
+    <h3 id="selected-date"></h3>
+    <div id="title-list"></div>
 
-const calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
-  initialView: 'dayGridMonth',
-  dateClick: (info) => openTodoPanel(info.dateStr)
-});
-calendar.render();
+    <input id="new-title" placeholder="タイトルを追加（例：業務スーパー）">
+    <button id="add-title">＋タイトル追加</button>
 
-function openTodoPanel(date) {
-  const panel = document.getElementById("todo-panel");
-  panel.classList.remove("hidden");
-  document.getElementById("selected-date").textContent = date;
-  renderList(date);
-}
+    <div id="task-area"></div>
+  </div>
 
-function renderList(date) {
-  const ul = document.getElementById("todo-list");
-  ul.innerHTML = "";
-  (todos[date] || []).forEach((item, i) => {
-    const li = document.createElement("li");
-    li.innerHTML = `<input type="checkbox" ${item.done ? "checked" : ""} 
-      onchange="toggle('${date}', ${i}, this.checked)"> ${item.text}`;
-    ul.appendChild(li);
-  });
-}
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+  <script>
+    const storageKey = "calendar_nested_todos";
+    let todos = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    let selectedDate = null;
+    let selectedTitleIndex = null;
 
-function toggle(date, index, done) {
-  todos[date][index].done = done;
-  localStorage.setItem(storageKey, JSON.stringify(todos));
-}
+    const calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
+      initialView: 'dayGridMonth',
+      dateClick: (info) => {
+        selectedDate = info.dateStr;
+        selectedTitleIndex = null;
+        document.getElementById("selected-date").textContent = selectedDate;
+        renderTitles();
+      },
+      dayCellDidMount: (info) => renderTitlesInCell(info)
+    });
+    calendar.render();
 
-document.getElementById("new-item").addEventListener("keypress", (e) => {
-  if (e.key === "Enter") {
-    const date = document.getElementById("selected-date").textContent;
-    const text = e.target.value.trim();
-    if (!todos[date]) todos[date] = [];
-    todos[date].push({ text, done: false });
-    e.target.value = "";
-    localStorage.setItem(storageKey, JSON.stringify(todos));
-    renderList(date);
-  }
-});
-</script>
+    // --- 日付セルにタイトル一覧を描画 ---
+    function renderTitlesInCell(info) {
+      const date = info.date.toISOString().split("T")[0];
+      const cell = info.el.querySelector(".fc-daygrid-day-frame");
+      const list = document.createElement("div");
+      (todos[date] || []).forEach((group, i) => {
+        const div = document.createElement("div");
+        div.classList.add("title-item");
+        div.textContent = "・" + group.title;
+        div.onclick = () => {
+          selectedDate = date;
+          selectedTitleIndex = i;
+          renderTitles();
+        };
+        list.appendChild(div);
+      });
+      cell.appendChild(list);
+    }
+
+    // --- タイトル一覧＋タスクを右下エリアに描画 ---
+    function renderTitles() {
+      const titleList = document.getElementById("title-list");
+      const taskArea = document.getElementById("task-area");
+      titleList.innerHTML = "";
+      taskArea.innerHTML = "";
+
+      (todos[selectedDate] || []).forEach((group, i) => {
+        const div = document.createElement("div");
+        div.textContent = `${i + 1}. ${group.title}`;
+        div.classList.add("title-item");
+        if (i === selectedTitleIndex) div.style.fontWeight = "bold";
+        div.onclick = () => {
+          selectedTitleIndex = i;
+          renderTitles();
+        };
+        titleList.appendChild(div);
+      });
+
+      if (selectedTitleIndex !== null) {
+        const g = todos[selectedDate][selectedTitleIndex];
+        const ul = document.createElement("div");
+        g.tasks.forEach((t, idx) => {
+          const li = document.createElement("div");
+          li.classList.add("task");
+          if (t.done) li.classList.add("done");
+          li.innerHTML = `<input type='checkbox' ${t.done ? "checked" : ""} onchange='toggleTask("${selectedDate}", ${selectedTitleIndex}, ${idx}, this.checked)'> ${t.text}`;
+          ul.appendChild(li);
+        });
+        taskArea.appendChild(ul);
+
+        const addTaskInput = document.createElement("input");
+        addTaskInput.id = "new-task";
+        addTaskInput.placeholder = "タスクを追加（例：トマトを買う）";
+        const addBtn = document.createElement("button");
+        addBtn.textContent = "＋タスク追加";
+        addBtn.onclick = addTask;
+        taskArea.appendChild(addTaskInput);
+        taskArea.appendChild(addBtn);
+      }
+
+      calendar.render();
+    }
+
+    // --- タイトル追加 ---
+    document.getElementById("add-title").onclick = () => {
+      const text = document.getElementById("new-title").value.trim();
+      if (!text || !selectedDate) return;
+      if (!todos[selectedDate]) todos[selectedDate] = [];
+      todos[selectedDate].push({ title: text, tasks: [] });
+      document.getElementById("new-title").value = "";
+      localStorage.setItem(storageKey, JSON.stringify(todos));
+      renderTitles();
+    };
+
+    // --- タスク追加 ---
+    function addTask() {
+      const text = document.getElementById("new-task").value.trim();
+      if (!text || selectedTitleIndex === null) return;
+      todos[selectedDate][selectedTitleIndex].tasks.push({ text, done: false });
+      document.getElementById("new-task").value = "";
+      localStorage.setItem(storageKey, JSON.stringify(todos));
+      renderTitles();
+    }
+
+    // --- チェック反映 ---
+    function toggleTask(date, titleIdx, taskIdx, done) {
+      todos[date][titleIdx].tasks[taskIdx].done = done;
+      localStorage.setItem(storageKey, JSON.stringify(todos));
+      renderTitles();
+    }
+
+    // グローバル公開
+    window.toggleTask = toggleTask;
+  </script>
+</body>
+</html>
